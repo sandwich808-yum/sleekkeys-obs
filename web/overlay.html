@@ -10,49 +10,67 @@
   <div id="root"></div>
   <script src="/core.js"></script>
   <script>
-    // Add as an OBS Browser Source. Options come from the URL (build one on the settings page).
+    // The OBS Browser Source URL is always just  http://127.0.0.1:7878/overlay
+    // Everything else (layout, theme, ...) comes from the editor and applies live - no URL changes needed.
+    // Optional:  /overlay?profile=Name  shows a specific profile (use different looks on different scenes).
     const SK = window.SleekKeys;
     const root = document.getElementById('root');
-    let ctrl = null, link = null, demoRun = null, fitOn = false;
+    const q = new URLSearchParams(location.search);
+    const preview = q.get('preview') === '1';        // inside the editor: fed by postMessage, not by the saved config
+    const fitOn = q.get('fit') === '1';
+    let ctrl = null, link = null, demoRun = null, current = null, wantDemo = false;
+    document.body.classList.toggle('center', q.get('align') === 'center');
 
-    // settings preview only: shrink wide layouts so they always fit the preview box
     function fit() {
       if (!ctrl) return;
       let s = 1;
       if (fitOn) s = Math.min(1, (innerWidth - 24) / (ctrl.size.w + 28), (innerHeight - 24) / (ctrl.size.h + 28));
       root.style.transform = s < 1 ? `scale(${s})` : '';
     }
-    window.addEventListener('resize', fit);
+    addEventListener('resize', fit);
 
-    function applyBackground(o) {
-      const bg = o.bg;
-      document.body.style.background =
-        bg === 'transparent' ? 'transparent' : bg === 'green' ? '#00ff00' : (/^#?[0-9a-f]{6}$/i.test(bg) ? (bg[0] === '#' ? bg : '#' + bg) : 'transparent');
+    function background(o) {
+      document.body.style.background = o.bg === 'green' ? '#00ff00' : (o.bg === 'transparent' ? 'transparent' : o.bg);
     }
 
-    function start(query, extra) {
-      const o = SK.parse(query);
-      const params = new URLSearchParams(extra || '');
+    function show(profile) {
+      const p = SK.normalizeProfile(profile);
+      const same = current && JSON.stringify(current) === JSON.stringify(p);
+      current = p;
+      if (same && !wantDemo === !demoRun) return;
       if (link) link.close();
-      if (demoRun) demoRun.stop();
+      if (demoRun) { demoRun.stop(); demoRun = null; }
       if (ctrl) ctrl.destroy();
-      applyBackground(o);
-      document.body.classList.toggle('center', params.get('align') === 'center');
-      ctrl = SK.mount(root, o);
-      fitOn = params.get('fit') === '1';
+      background(p.opts);
+      ctrl = SK.mount(root, p.opts, p.layout);
       fit();
-      link = SK.connect(ctrl, (ok) => parent !== window && parent.postMessage({ type: 'status', ok }, '*'));
-      if (params.get('demo') === '1') demoRun = SK.demo(ctrl);
-      if (parent !== window) parent.postMessage({ type: 'size', w: ctrl.size.w, h: ctrl.size.h }, '*');
+      link = SK.connect(ctrl, {
+        status: (ok) => parent !== window && parent.postMessage({ type: 'status', ok }, location.origin),
+        config: () => { if (!preview) load(); },
+      });
+      if (wantDemo) demoRun = SK.demo(ctrl);
+      if (parent !== window) parent.postMessage({ type: 'size', w: ctrl.size.w, h: ctrl.size.h }, location.origin);
     }
 
-    start(location.search, location.search);
+    async function load() {
+      let cfg = null;
+      try { cfg = await (await fetch('/api/config', { cache: 'no-store' })).json(); } catch (_) {}
+      cfg = SK.normalizeConfig(cfg);
+      const name = q.get('profile');
+      show(cfg.profiles[name] || cfg.profiles[cfg.active]);
+    }
 
-    // live updates from the settings page preview
-    window.addEventListener('message', (e) => {
-      if (e.origin !== location.origin || !e.data) return;
-      if (e.data.type === 'opts') start(e.data.query, e.data.extra);
-    });
+    if (preview) {
+      addEventListener('message', (e) => {
+        if (e.origin !== location.origin || !e.data || e.data.type !== 'profile') return;
+        wantDemo = !!e.data.demo;
+        show(e.data.profile);
+      });
+      parent !== window && parent.postMessage({ type: 'ready' }, location.origin);
+    } else {
+      load();
+      setInterval(() => { if (!link) load(); }, 5000);   // recover if the app was restarted
+    }
   </script>
 </body>
 </html>

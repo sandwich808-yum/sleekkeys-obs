@@ -1,104 +1,191 @@
-/* SleekKeys core: layouts, options, renderer and the live connection. Used by the overlay and the settings preview. */
+/* SleekKeys core: data model (profiles + layouts), renderer, live connection. Shared by the overlay and the editor. */
 (() => {
   'use strict';
 
-  const BASE = 56; // key size in px at scale 1
+  const BASE = 56;            // key size in px at scale 1
+  const MOUSE_W = 2.1;        // mouse width in key units (at mouse.scale 1)
+  const MOUSE_H = MOUSE_W * 214 / 128;
 
-  // ------------------------------------------------------------------ layouts
-  const L = (code, label, w = 1) => ({ code, label, w });
-  const letters = (s) => [...s].map((ch) => L('Key' + ch, ch));
+  // ------------------------------------------------------------------ key catalogue (for the editor)
+  // [code, label, default width]
+  const CATALOG = [
+    ['Escape', 'ESC', 1], ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => ['F' + n, 'F' + n, 1]),
+    ['Backquote', '`', 1], ...'1234567890'.split('').map((d) => ['Digit' + d, d, 1]), ['Minus', '-', 1], ['Equal', '=', 1], ['Backspace', 'BKSP', 2],
+    ['Tab', 'TAB', 1.5], ...'QWERTYUIOP'.split('').map((c) => ['Key' + c, c, 1]), ['BracketLeft', '[', 1], ['BracketRight', ']', 1], ['Backslash', '\\', 1.5],
+    ['CapsLock', 'CAPS', 1.75], ...'ASDFGHJKL'.split('').map((c) => ['Key' + c, c, 1]), ['Semicolon', ';', 1], ['Quote', "'", 1], ['Enter', 'ENTER', 2.25],
+    ['ShiftLeft', 'SHIFT', 2.25], ...'ZXCVBNM'.split('').map((c) => ['Key' + c, c, 1]), ['Comma', ',', 1], ['Period', '.', 1], ['Slash', '/', 1], ['ShiftRight', 'SHIFT', 2.75],
+    ['ControlLeft', 'CTRL', 1.25], ['MetaLeft', 'WIN', 1.25], ['AltLeft', 'ALT', 1.25], ['Space', '', 6.25], ['AltRight', 'ALT', 1.25], ['MetaRight', 'WIN', 1.25], ['ContextMenu', 'MENU', 1.25], ['ControlRight', 'CTRL', 1.25],
+    ['ArrowUp', '\u25B2', 1], ['ArrowLeft', '\u25C0', 1], ['ArrowDown', '\u25BC', 1], ['ArrowRight', '\u25B6', 1],
+    ['Insert', 'INS', 1], ['Delete', 'DEL', 1], ['Home', 'HOME', 1], ['End', 'END', 1], ['PageUp', 'PGUP', 1], ['PageDown', 'PGDN', 1],
+    ['PrintScreen', 'PRT', 1], ['ScrollLock', 'SCR', 1], ['NumLock', 'NUM', 1],
+    ...'0123456789'.split('').map((d) => ['Numpad' + d, 'N' + d, 1]),
+    ['NumpadDivide', 'N/', 1], ['NumpadMultiply', 'N*', 1], ['NumpadSubtract', 'N-', 1], ['NumpadAdd', 'N+', 1], ['NumpadDecimal', 'N.', 1], ['NumpadEnter', 'N\u21B5', 1],
+  ];
+  const CATALOG_BY_CODE = {};
+  CATALOG.forEach((k) => { if (!CATALOG_BY_CODE[k[0]]) CATALOG_BY_CODE[k[0]] = k; });
+
+  // ------------------------------------------------------------------ built-in layouts
+  const K = (c, l, w = 1) => ({ c, l, w });
+  const letters = (s) => [...s].map((ch) => K('Key' + ch, ch));
   const row = (y, x, items) => {
     const out = [];
     let cx = x;
     for (const it of items) {
-      if (typeof it === 'number') { cx += it; continue; } // spacer
-      out.push({ c: it.code, l: it.label, x: cx, y, w: it.w });
+      if (typeof it === 'number') { cx += it; continue; }
+      out.push({ c: it.c, l: it.l, x: cx, y, w: it.w, h: 1 });
       cx += it.w;
     }
     return out;
   };
 
-  const LAYOUTS = {
-    gamer: {
-      name: 'Gamer (left hand)',
+  const PRESETS = {
+    gamer: { name: 'Gamer (left hand)', build: () => ({
       keys: [
-        ...row(0, 1.5, [L('Digit1', '1'), L('Digit2', '2'), L('Digit3', '3'), L('Digit4', '4'), L('Digit5', '5')]),
-        ...row(1, 0, [L('Tab', 'TAB', 1.5), ...letters('QWERT')]),
-        ...row(2, 0, [L('CapsLock', 'CAPS', 1.75), ...letters('ASDFG')]),
-        ...row(3, 0, [L('ShiftLeft', 'SHIFT', 2.25), ...letters('ZXCV')]),
-        ...row(4, 0, [L('ControlLeft', 'CTRL', 1.25), L('MetaLeft', 'WIN', 1.25), L('AltLeft', 'ALT', 1.25), L('Space', '', 3)]),
+        ...row(0, 1.5, [K('Digit1', '1'), K('Digit2', '2'), K('Digit3', '3'), K('Digit4', '4'), K('Digit5', '5')]),
+        ...row(1, 0, [K('Tab', 'TAB', 1.5), ...letters('QWERT')]),
+        ...row(2, 0, [K('CapsLock', 'CAPS', 1.75), ...letters('ASDFG')]),
+        ...row(3, 0, [K('ShiftLeft', 'SHIFT', 2.25), ...letters('ZXCV')]),
+        ...row(4, 0, [K('ControlLeft', 'CTRL', 1.25), K('MetaLeft', 'WIN', 1.25), K('AltLeft', 'ALT', 1.25), K('Space', '', 3)]),
       ],
-    },
-    wasd: {
-      name: 'WASD (compact)',
+      mouse: { show: true, x: 7.5, y: 0.6, scale: 1 },
+    }) },
+    wasd: { name: 'WASD (compact)', build: () => ({
       keys: [
         ...row(0, 0, letters('QWER')),
         ...row(1, 0.3, letters('ASDF')),
-        ...row(2, 0, [L('ShiftLeft', 'SHIFT', 1.5), L('Space', '', 2.6)]),
+        ...row(2, 0, [K('ShiftLeft', 'SHIFT', 1.5), K('Space', '', 2.6)]),
       ],
-    },
-    compact: {
-      name: 'Full keyboard + arrows',
+      mouse: { show: true, x: 4.6, y: 0, scale: 0.85 },
+    }) },
+    full: { name: 'Full keyboard + arrows', build: () => ({
       keys: [
-        ...row(0, 0, [L('Backquote', '`'), ...'1234567890'.split('').map((d) => L('Digit' + d, d)), L('Minus', '-'), L('Equal', '='), L('Backspace', 'BKSP', 2)]),
-        ...row(1, 0, [L('Tab', 'TAB', 1.5), ...letters('QWERTYUIOP'), L('BracketLeft', '['), L('BracketRight', ']'), L('Backslash', '\\', 1.5)]),
-        ...row(2, 0, [L('CapsLock', 'CAPS', 1.75), ...letters('ASDFGHJKL'), L('Semicolon', ';'), L('Quote', "'"), L('Enter', 'ENTER', 2.25)]),
-        ...row(3, 0, [L('ShiftLeft', 'SHIFT', 2.25), ...letters('ZXCVBNM'), L('Comma', ','), L('Period', '.'), L('Slash', '/'), L('ShiftRight', 'SHIFT', 2.75)]),
-        ...row(4, 0, [L('ControlLeft', 'CTRL', 1.25), L('MetaLeft', 'WIN', 1.25), L('AltLeft', 'ALT', 1.25), L('Space', '', 6.25), L('AltRight', 'ALT', 1.25), L('MetaRight', 'WIN', 1.25), L('ContextMenu', 'MENU', 1.25), L('ControlRight', 'CTRL', 1.25)]),
-        ...row(3, 16, [L('ArrowUp', '▲')]),
-        ...row(4, 15, [L('ArrowLeft', '◀'), L('ArrowDown', '▼'), L('ArrowRight', '▶')]),
+        ...row(0, 0, [K('Backquote', '`'), ...'1234567890'.split('').map((d) => K('Digit' + d, d)), K('Minus', '-'), K('Equal', '='), K('Backspace', 'BKSP', 2)]),
+        ...row(1, 0, [K('Tab', 'TAB', 1.5), ...letters('QWERTYUIOP'), K('BracketLeft', '['), K('BracketRight', ']'), K('Backslash', '\\', 1.5)]),
+        ...row(2, 0, [K('CapsLock', 'CAPS', 1.75), ...letters('ASDFGHJKL'), K('Semicolon', ';'), K('Quote', "'"), K('Enter', 'ENTER', 2.25)]),
+        ...row(3, 0, [K('ShiftLeft', 'SHIFT', 2.25), ...letters('ZXCVBNM'), K('Comma', ','), K('Period', '.'), K('Slash', '/'), K('ShiftRight', 'SHIFT', 2.75)]),
+        ...row(4, 0, [K('ControlLeft', 'CTRL', 1.25), K('MetaLeft', 'WIN', 1.25), K('AltLeft', 'ALT', 1.25), K('Space', '', 6.25), K('AltRight', 'ALT', 1.25), K('MetaRight', 'WIN', 1.25), K('ContextMenu', 'MENU', 1.25), K('ControlRight', 'CTRL', 1.25)]),
+        ...row(3, 16, [K('ArrowUp', '\u25B2')]),
+        ...row(4, 15, [K('ArrowLeft', '\u25C0'), K('ArrowDown', '\u25BC'), K('ArrowRight', '\u25B6')]),
       ],
-    },
-    mouse: { name: 'Mouse only', keys: [] },
+      mouse: { show: true, x: 18.7, y: 0.4, scale: 1 },
+    }) },
+    arrows: { name: 'Arrow keys only', build: () => ({
+      keys: [...row(0, 1, [K('ArrowUp', '\u25B2')]), ...row(1, 0, [K('ArrowLeft', '\u25C0'), K('ArrowDown', '\u25BC'), K('ArrowRight', '\u25B6')])],
+      mouse: { show: false, x: 4, y: 0, scale: 1 },
+    }) },
+    mouse: { name: 'Mouse only', build: () => ({ keys: [], mouse: { show: true, x: 0, y: 0, scale: 1 } }) },
   };
 
-  // ------------------------------------------------------------------ options
-  const DEFAULTS = {
-    layout: 'gamer', theme: 'glass', accent: '#3dffb5', scale: 1, gap: 6, radius: 12, alpha: 0.62,
-    glow: 0.6, label: 0.3, font: 'Segoe UI', mouse: 1, side: 'right', cps: 0, tilt: 1, bg: 'transparent',
+  // ------------------------------------------------------------------ options / profiles
+  const DEFAULT_OPTS = {
+    theme: 'glass', accent: '#3dffb5', scale: 1, gap: 6, radius: 12, alpha: 0.62,
+    glow: 0.6, label: 0.3, font: 'Segoe UI', cps: 0, tilt: 1, bg: 'transparent',
   };
+  const LIMITS = { scale: [0.3, 3], gap: [0, 24], radius: [0, 40], alpha: [0.05, 1], glow: [0, 2], label: [0.15, 0.6] };
+  const THEMES = ['glass', 'neon', 'light', 'mono'];
 
-  function parse(search) {
-    const q = new URLSearchParams(search);
-    const o = { ...DEFAULTS };
-    for (const k of Object.keys(DEFAULTS)) {
-      if (!q.has(k)) continue;
-      const v = q.get(k);
-      if (typeof DEFAULTS[k] === 'number') { const n = Number(v); o[k] = Number.isFinite(n) ? n : DEFAULTS[k]; }
-      else o[k] = v;
-    }
-    if (!LAYOUTS[o.layout]) o.layout = DEFAULTS.layout;
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+
+  function makeLayout(presetId) {
+    const p = PRESETS[presetId] || PRESETS.gamer;
+    const l = p.build();
+    l.name = p.name;
+    return l;
+  }
+
+  // Never trust stored/imported data: clamp every number, whitelist strings, cap the key count.
+  function normalizeLayout(raw) {
+    const base = raw && typeof raw === 'object' ? raw : makeLayout('gamer');
+    const keys = (Array.isArray(base.keys) ? base.keys : []).slice(0, 300).map((k) => ({
+      c: String(k && k.c || '').slice(0, 32),
+      l: String(k && k.l != null ? k.l : '').slice(0, 8),
+      x: clamp(num(k && k.x, 0), 0, 60),
+      y: clamp(num(k && k.y, 0), 0, 30),
+      w: clamp(num(k && k.w, 1), 0.5, 20),
+      h: clamp(num(k && k.h, 1), 0.5, 10),
+    })).filter((k) => k.c);
+    const m = base.mouse && typeof base.mouse === 'object' ? base.mouse : {};
+    return {
+      name: String(base.name || 'Custom').slice(0, 40),
+      keys,
+      mouse: { show: m.show !== false, x: clamp(num(m.x, 0), 0, 60), y: clamp(num(m.y, 0), 0, 30), scale: clamp(num(m.scale, 1), 0.4, 3) },
+    };
+  }
+
+  function normalizeOpts(raw) {
+    const o = { ...DEFAULT_OPTS, ...(raw && typeof raw === 'object' ? raw : {}) };
+    for (const k of Object.keys(LIMITS)) o[k] = clamp(num(o[k], DEFAULT_OPTS[k]), LIMITS[k][0], LIMITS[k][1]);
+    if (!THEMES.includes(o.theme)) o.theme = DEFAULT_OPTS.theme;
+    if (!/^#[0-9a-f]{6}$/i.test(o.accent)) o.accent = DEFAULT_OPTS.accent;
+    o.font = String(o.font || DEFAULT_OPTS.font).replace(/["\\<>]/g, '').slice(0, 40);
+    o.cps = o.cps ? 1 : 0;
+    o.tilt = o.tilt ? 1 : 0;
+    o.bg = o.bg === 'green' || /^#[0-9a-f]{6}$/i.test(o.bg) ? o.bg : 'transparent';
     return o;
   }
 
-  function toQuery(o) {
-    const q = new URLSearchParams();
-    for (const k of Object.keys(DEFAULTS)) if (o[k] !== DEFAULTS[k]) q.set(k, o[k]);
-    return q.toString();
+  const normalizeProfile = (p) => ({ opts: normalizeOpts(p && p.opts), layout: normalizeLayout(p && p.layout) });
+
+  function defaultConfig() {
+    return { version: 1, active: 'Default', profiles: { Default: { opts: { ...DEFAULT_OPTS }, layout: makeLayout('gamer') } } };
   }
 
+  function normalizeConfig(raw) {
+    if (!raw || typeof raw !== 'object' || !raw.profiles || typeof raw.profiles !== 'object') return defaultConfig();
+    const profiles = {};
+    for (const [name, p] of Object.entries(raw.profiles).slice(0, 30)) profiles[String(name).slice(0, 40)] = normalizeProfile(p);
+    if (!Object.keys(profiles).length) return defaultConfig();
+    const active = profiles[raw.active] ? raw.active : Object.keys(profiles)[0];
+    return { version: 1, active, profiles };
+  }
+
+  // ------------------------------------------------------------------ geometry
   function hexToRgb(hex) {
     const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
     const n = parseInt(m ? m[1] : '3dffb5', 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
   }
 
+  // size of the whole board in key units
+  function bounds(layout, withCps) {
+    let w = 0, h = 0;
+    for (const k of layout.keys) { w = Math.max(w, k.x + k.w); h = Math.max(h, k.y + k.h); }
+    if (layout.mouse.show) {
+      w = Math.max(w, layout.mouse.x + MOUSE_W * layout.mouse.scale);
+      h = Math.max(h, layout.mouse.y + MOUSE_H * layout.mouse.scale + (withCps ? 0.5 : 0));
+    }
+    return { w, h };
+  }
+
+  function applyTheme(el, o) {
+    const unit = BASE * o.scale;
+    const [r, g, b] = hexToRgb(o.accent);
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    const s = el.style;
+    el.dataset.theme = o.theme;
+    s.setProperty('--u', unit + 'px');
+    s.setProperty('--gap', o.gap * o.scale + 'px');
+    s.setProperty('--r', o.radius * o.scale + 'px');
+    s.setProperty('--accent', o.accent);
+    s.setProperty('--accent-rgb', `${r},${g},${b}`);
+    s.setProperty('--accent-ink', lum > 0.55 ? '#07110c' : '#ffffff');
+    s.setProperty('--alpha', String(o.alpha));
+    s.setProperty('--glow', String(o.glow));
+    s.setProperty('--fs', unit * o.label + 'px');
+    s.setProperty('--font', `"${o.font}", "Segoe UI", system-ui, sans-serif`);
+  }
+
   // ------------------------------------------------------------------ DOM helpers
-  const el = (tag, cls, html) => {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (html != null) e.innerHTML = html;
-    return e;
-  };
+  const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
 
   const BODY = 'M60 5 C26 5 9 32 9 74 V118 C9 160 30 185 60 185 C90 185 111 160 111 118 V74 C111 32 94 5 60 5 Z';
-
-  function mouseSvg() {
+  function mouseSvg(uid) {
     return `
     <svg viewBox="-4 -14 128 214" xmlns="http://www.w3.org/2000/svg">
-      <defs><clipPath id="skbody"><path d="${BODY}"/></clipPath></defs>
+      <defs><clipPath id="skbody${uid}"><path d="${BODY}"/></clipPath></defs>
       <path class="m-body" d="${BODY}"/>
-      <g clip-path="url(#skbody)">
+      <g clip-path="url(#skbody${uid})">
         <rect class="mb m-btn" data-b="l" x="0" y="0" width="59" height="84"/>
         <rect class="mb m-btn" data-b="r" x="61" y="0" width="60" height="84"/>
       </g>
@@ -111,72 +198,71 @@
     </svg>`;
   }
 
-  // ------------------------------------------------------------------ renderer
-  function mount(root, o) {
-    root.innerHTML = '';
-    root.dataset.theme = o.theme;
-    const unit = BASE * o.scale;
-    const gap = o.gap * o.scale;
-    const step = unit + gap;
-    const [r, g, b] = hexToRgb(o.accent);
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    const s = root.style;
-    s.setProperty('--u', unit + 'px');
-    s.setProperty('--gap', gap + 'px');
-    s.setProperty('--r', o.radius * o.scale + 'px');
-    s.setProperty('--accent', o.accent);
-    s.setProperty('--accent-rgb', `${r},${g},${b}`);
-    s.setProperty('--accent-ink', lum > 0.55 ? '#07110c' : '#ffffff');
-    s.setProperty('--alpha', String(o.alpha));
-    s.setProperty('--glow', String(o.glow));
-    s.setProperty('--fs', unit * o.label + 'px');
-    s.setProperty('--font', `"${o.font}", "Segoe UI", system-ui, sans-serif`);
+  function keyNode(k, step, gap, unit) {
+    const n = el('div', 'key');
+    const s = document.createElement('span');
+    s.textContent = k.l;
+    n.appendChild(s);
+    if (k.l.length > 1 && k.l.length <= 6 && !/[\u25B2-\u25C0]/.test(k.l)) n.classList.add('small');
+    n.style.left = k.x * step + 'px';
+    n.style.top = k.y * step + 'px';
+    n.style.width = k.w * step - gap + 'px';
+    n.style.height = k.h * step - gap + 'px';
+    return n;
+  }
 
-    const layout = LAYOUTS[o.layout];
-    const wrap = el('div', 'wrap');
-    wrap.dataset.side = o.side;
+  let uidCounter = 0;
+
+  // ------------------------------------------------------------------ renderer
+  function mount(root, o, layout) {
+    root.innerHTML = '';
+    applyTheme(root, o);
+    const unit = BASE * o.scale, gap = o.gap * o.scale, step = unit + gap;
+
     const board = el('div', 'board');
     const keys = new Map();
-    let maxX = 0, maxY = 0;
     for (const k of layout.keys) {
-      const n = el('div', 'key', `<span>${k.l}</span>`);
-      if (k.l.length > 1 && k.l.length <= 6 && !/[▲-◀]/.test(k.l)) n.classList.add('small');
-      n.style.left = k.x * step + 'px';
-      n.style.top = k.y * step + 'px';
-      n.style.width = k.w * step - gap + 'px';
-      n.style.height = unit + 'px';
+      const n = keyNode(k, step, gap, unit);
       board.appendChild(n);
-      keys.set(k.c, n);
-      maxX = Math.max(maxX, k.x + k.w);
-      maxY = Math.max(maxY, k.y + 1);
+      if (!keys.has(k.c)) keys.set(k.c, []);
+      keys.get(k.c).push(n);
     }
-    board.style.width = Math.max(0, maxX * step - gap) + 'px';
-    board.style.height = Math.max(0, maxY * step - gap) + 'px';
-    if (layout.keys.length) wrap.appendChild(board);
+    const b = bounds(layout, o.cps);
+    board.style.width = Math.max(0, b.w * step - gap) + 'px';
+    board.style.height = Math.max(0, b.h * step - gap) + 'px';
 
-    let mouseEl = null, tiltEl = null, cpsEl = null;
+    let tiltEl = null, cpsEl = null;
     const parts = {};
-    if (o.mouse) {
-      mouseEl = el('div', 'mouse');
-      tiltEl = el('div', 'mouse-tilt', mouseSvg());
-      mouseEl.appendChild(tiltEl);
-      if (o.cps) { cpsEl = el('div', 'cps', '<span data-c="l">L 0</span><span data-c="r">R 0</span>'); mouseEl.appendChild(cpsEl); }
+    if (layout.mouse.show) {
+      const m = el('div', 'mouse');
+      m.style.left = layout.mouse.x * step + 'px';
+      m.style.top = layout.mouse.y * step + 'px';
+      m.style.width = MOUSE_W * layout.mouse.scale * step + 'px';
+      tiltEl = el('div', 'mouse-tilt');
+      tiltEl.innerHTML = mouseSvg(++uidCounter);
+      m.appendChild(tiltEl);
+      if (o.cps) {
+        cpsEl = el('div', 'cps');
+        cpsEl.innerHTML = '<span data-c="l">L 0</span><span data-c="r">R 0</span>';
+        m.appendChild(cpsEl);
+      }
       tiltEl.querySelectorAll('[data-b]').forEach((n) => { parts[n.dataset.b] = n; });
-      wrap.appendChild(mouseEl);
+      board.appendChild(m);
     }
-    root.appendChild(wrap);
+    root.appendChild(board);
 
-    // ---- state changes
     const pulse = (node) => {
       const p = el('i', 'pulse');
       node.appendChild(p);
       p.addEventListener('animationend', () => p.remove());
     };
     const setKey = (code, down) => {
-      const n = keys.get(code);
-      if (!n) return;
-      if (down) { if (!n.classList.contains('down')) pulse(n); n.classList.add('down'); }
-      else n.classList.remove('down');
+      const list = keys.get(code);
+      if (!list) return;
+      for (const n of list) {
+        if (down) { if (!n.classList.contains('down')) pulse(n); n.classList.add('down'); }
+        else n.classList.remove('down');
+      }
     };
     const clicks = { l: [], r: [] };
     const setBtn = (btn, down) => {
@@ -188,10 +274,9 @@
     const wheel = (dir) => {
       const w = parts.m;
       if (!w) return;
-      const cls = dir > 0 ? 'sc-up' : 'sc-dn';
       w.classList.remove('sc-up', 'sc-dn');
-      void w.getBoundingClientRect(); // restart the CSS animation
-      w.classList.add(cls);
+      void w.getBoundingClientRect();
+      w.classList.add(dir > 0 ? 'sc-up' : 'sc-dn');
       const arrow = tiltEl.querySelector(dir > 0 ? '.m-arrow.up' : '.m-arrow.dn');
       arrow.classList.add('on');
       clearTimeout(arrow._t);
@@ -200,16 +285,15 @@
     let vx = 0, vy = 0;
     const move = (dx, dy) => { vx += dx; vy += dy; };
     const releaseAll = () => {
-      keys.forEach((n) => n.classList.remove('down'));
+      keys.forEach((list) => list.forEach((n) => n.classList.remove('down')));
       Object.values(parts).forEach((n) => n.classList.remove('on'));
     };
 
-    // ---- animation loop (mouse tilt + CPS counters)
     let raf = 0, lastCps = 0;
     const loop = (t) => {
       if (tiltEl && o.tilt) {
         vx *= 0.88; vy *= 0.88;
-        const cx = Math.max(-40, Math.min(40, vx)), cy = Math.max(-40, Math.min(40, vy));
+        const cx = clamp(vx, -40, 40), cy = clamp(vy, -40, 40);
         tiltEl.style.transform = `translate(${(cx * 0.22).toFixed(2)}px, ${(cy * 0.22).toFixed(2)}px) rotate(${(cx * 0.16).toFixed(2)}deg)`;
       }
       if (cpsEl && t - lastCps > 100) {
@@ -223,9 +307,10 @@
     };
     raf = requestAnimationFrame(loop);
 
-    const rect = wrap.getBoundingClientRect();
+    const rect = board.getBoundingClientRect();
+    const codes = [...keys.keys()];
     return {
-      codes: [...keys.keys()],
+      codes,
       size: { w: Math.ceil(rect.width), h: Math.ceil(rect.height) },
       setKey, setBtn, wheel, move, releaseAll,
       handle(ev) {
@@ -235,26 +320,30 @@
         else if (ev.t === 'mv') move(ev.x, ev.y);
         else if (ev.t === 's') { releaseAll(); ev.k.forEach((c) => setKey(c, 1)); ev.m.forEach((m) => setBtn(m, 1)); }
       },
-      keyCodes: [...keys.keys()],
       destroy() { cancelAnimationFrame(raf); root.innerHTML = ''; },
     };
   }
 
   // ------------------------------------------------------------------ live connection
-  function connect(ctrl, onStatus) {
-    // Only ask the server for the keys this layout actually shows: everything else you type stays private.
-    const url = '/events' + (ctrl.codes.length ? '?codes=' + ctrl.codes.join(',') : '?codes=_none_');
+  // Only the keys the layout shows are requested, so everything else you type never leaves the keyboard hook.
+  function connect(ctrl, handlers) {
+    const url = '/events?codes=' + (ctrl.codes.length ? ctrl.codes.map(encodeURIComponent).join(',') : '_none_');
     const es = new EventSource(url);
-    es.onopen = () => onStatus && onStatus(true);
-    es.onerror = () => { onStatus && onStatus(false); ctrl.releaseAll(); };
-    es.onmessage = (e) => { try { ctrl.handle(JSON.parse(e.data)); } catch (_) { /* ignore */ } };
+    es.onopen = () => handlers.status && handlers.status(true);
+    es.onerror = () => { handlers.status && handlers.status(false); ctrl.releaseAll(); };
+    es.onmessage = (e) => {
+      try {
+        const ev = JSON.parse(e.data);
+        if (ev.t === 'cfg') handlers.config && handlers.config(ev);
+        else ctrl.handle(ev);
+      } catch (_) { /* ignore */ }
+    };
     return { close: () => es.close() };
   }
 
-  // fake input so you can preview themes without touching the keyboard
   function demo(ctrl) {
     let on = true;
-    const codes = ctrl.keyCodes;
+    const codes = ctrl.codes;
     const tick = () => {
       if (!on) return;
       if (codes.length && Math.random() < 0.8) {
@@ -272,5 +361,9 @@
     return { stop() { on = false; } };
   }
 
-  window.SleekKeys = { BASE, LAYOUTS, DEFAULTS, parse, toQuery, mount, connect, demo };
+  window.SleekKeys = {
+    BASE, MOUSE_W, MOUSE_H, CATALOG, CATALOG_BY_CODE, PRESETS, DEFAULT_OPTS, LIMITS, THEMES,
+    makeLayout, normalizeLayout, normalizeOpts, normalizeProfile, normalizeConfig, defaultConfig,
+    bounds, applyTheme, hexToRgb, mouseSvg, keyNode, mount, connect, demo,
+  };
 })();
