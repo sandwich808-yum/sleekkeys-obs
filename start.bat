@@ -1,6 +1,4 @@
 @echo off
-title SleekKeys
+rem Runs SleekKeys from source (needs Python). Normal users just double-click SleekKeys.exe instead.
 cd /d "%~dp0"
-echo Starting SleekKeys...  (close this window or press Ctrl+C to stop)
-python sleekkeys.py --open
-if errorlevel 1 pause
+start "" pythonw sleekkeys.py --editor

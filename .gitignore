@@ -1,4 +1,8 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 *.log
-
+dist/
+build/
+*.spec
+.venv-build/
+SleekKeys.exe
