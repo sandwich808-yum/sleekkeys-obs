@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SleekKeys Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="overlay">
+  <div id="root"></div>
+  <script src="/core.js"></script>
+  <script>
+    // Add as an OBS Browser Source. Options come from the URL (build one on the settings page).
+    const SK = window.SleekKeys;
+    const root = document.getElementById('root');
+    let ctrl = null, link = null, demoRun = null, fitOn = false;
+
+    // settings preview only: shrink wide layouts so they always fit the preview box
+    function fit() {
+      if (!ctrl) return;
+      let s = 1;
+      if (fitOn) s = Math.min(1, (innerWidth - 24) / (ctrl.size.w + 28), (innerHeight - 24) / (ctrl.size.h + 28));
+      root.style.transform = s < 1 ? `scale(${s})` : '';
+    }
+    window.addEventListener('resize', fit);
+
+    function applyBackground(o) {
+      const bg = o.bg;
+      document.body.style.background =
+        bg === 'transparent' ? 'transparent' : bg === 'green' ? '#00ff00' : (/^#?[0-9a-f]{6}$/i.test(bg) ? (bg[0] === '#' ? bg : '#' + bg) : 'transparent');
+    }
+
+    function start(query, extra) {
+      const o = SK.parse(query);
+      const params = new URLSearchParams(extra || '');
+      if (link) link.close();
+      if (demoRun) demoRun.stop();
+      if (ctrl) ctrl.destroy();
+      applyBackground(o);
+      document.body.classList.toggle('center', params.get('align') === 'center');
+      ctrl = SK.mount(root, o);
+      fitOn = params.get('fit') === '1';
+      fit();
+      link = SK.connect(ctrl, (ok) => parent !== window && parent.postMessage({ type: 'status', ok }, '*'));
+      if (params.get('demo') === '1') demoRun = SK.demo(ctrl);
+      if (parent !== window) parent.postMessage({ type: 'size', w: ctrl.size.w, h: ctrl.size.h }, '*');
+    }
+
+    start(location.search, location.search);
+
+    // live updates from the settings page preview
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin || !e.data) return;
+      if (e.data.type === 'opts') start(e.data.query, e.data.extra);
+    });
+  </script>
+</body>
+</html>
